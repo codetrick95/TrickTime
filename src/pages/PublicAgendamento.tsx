@@ -507,25 +507,25 @@ const PublicAgendamento = () => {
                     <h4 className="font-medium mb-2">Redes Sociais</h4>
                     <div className="flex flex-wrap gap-2">
                       {profile.instagram && (
-                        <Button variant="outline" size="sm" className="flex items-center gap-1">
+                        <Button variant="outline" size="sm" className="flex items-center gap-1 bg-gradient-to-r from-purple-500 to-pink-500 text-white border-transparent hover:bg-gradient-to-r hover:from-purple-600 hover:to-pink-600">
                           <Instagram className="h-3 w-3" />
                           Instagram
                         </Button>
                       )}
                       {profile.tiktok && (
-                        <Button variant="outline" size="sm" className="flex items-center gap-1">
+                        <Button variant="outline" size="sm" className="flex items-center gap-1 bg-black text-white border-transparent hover:bg-gray-900">
                           <Youtube className="h-3 w-3" />
                           TikTok
                         </Button>
                       )}
                       {profile.facebook && (
-                        <Button variant="outline" size="sm" className="flex items-center gap-1">
+                        <Button variant="outline" size="sm" className="flex items-center gap-1 bg-blue-600 text-white border-transparent hover:bg-blue-700">
                           <Facebook className="h-3 w-3" />
                           Facebook
                         </Button>
                       )}
                       {profile.linkedin && (
-                        <Button variant="outline" size="sm" className="flex items-center gap-1">
+                        <Button variant="outline" size="sm" className="flex items-center gap-1 bg-blue-700 text-white border-transparent hover:bg-blue-800">
                           <Linkedin className="h-3 w-3" />
                           LinkedIn
                         </Button>
@@ -671,4 +671,4 @@ const PublicAgendamento = () => {
   );
 };
 
-export default PublicAgendamento; 
+export default PublicAgendamento;

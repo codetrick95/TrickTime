@@ -716,25 +716,25 @@ const Configuracoes = () => {
                     <Label className="text-sm font-medium">Redes Sociais</Label>
                     <div className="flex flex-wrap gap-2">
                       {profile.instagram && (
-                        <Badge variant="secondary" className="flex items-center gap-1">
+                        <Badge variant="secondary" className="flex items-center gap-1 bg-gradient-to-r from-purple-500 to-pink-500 text-white">
                           <Instagram className="h-3 w-3" />
                           Instagram
                         </Badge>
                       )}
                       {profile.tiktok && (
-                        <Badge variant="secondary" className="flex items-center gap-1">
+                        <Badge variant="secondary" className="flex items-center gap-1 bg-black text-white">
                           <Youtube className="h-3 w-3" />
                           TikTok
                         </Badge>
                       )}
                       {profile.facebook && (
-                        <Badge variant="secondary" className="flex items-center gap-1">
+                        <Badge variant="secondary" className="flex items-center gap-1 bg-blue-600 text-white">
                           <Facebook className="h-3 w-3" />
                           Facebook
                         </Badge>
                       )}
                       {profile.linkedin && (
-                        <Badge variant="secondary" className="flex items-center gap-1">
+                        <Badge variant="secondary" className="flex items-center gap-1 bg-blue-700 text-white">
                           <Linkedin className="h-3 w-3" />
                           LinkedIn
                         </Badge>
@@ -1100,4 +1100,4 @@ const Configuracoes = () => {
   );
 };
 
-export default Configuracoes; 
+export default Configuracoes;

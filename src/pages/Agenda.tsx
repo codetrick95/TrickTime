@@ -39,6 +39,9 @@ const Agenda = () => {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<ViewMode>('daily');
   const [saving, setSaving] = useState(false);
+  const [dayAgendamentosModalOpen, setDayAgendamentosModalOpen] = useState(false);
+  const [selectedDayAgendamentos, setSelectedDayAgendamentos] = useState<Agendamento[]>([]);
+  const [selectedDayForModal, setSelectedDayForModal] = useState<Date | null>(null);
 
   const [form, setForm] = useState({
     nome_paciente: '',
@@ -222,6 +225,7 @@ const Agenda = () => {
     try {
       let startDate: Date;
       let endDate: Date;
+      const now = new Date(); // Data atual para filtrar agendamentos passados
 
       switch (viewMode) {
         case 'daily':
@@ -243,6 +247,12 @@ const Agenda = () => {
         default:
           startDate = startOfDay(selectedDate);
           endDate = endOfDay(selectedDate);
+      }
+      
+      // Garantir que não exibimos agendamentos passados
+      // Se a data de início for anterior à data atual, usamos a data atual como início
+      if (startDate < now) {
+        startDate = now;
       }
       
       const { data, error } = await supabase
@@ -267,8 +277,51 @@ const Agenda = () => {
   };
 
   useEffect(() => {
-    fetchAgendamentos();
+    if (user) {
+      // Verificar e atualizar agendamentos passados
+      updatePastAgendamentos();
+      fetchAgendamentos();
+    }
   }, [user, selectedDate, viewMode]);
+  
+  // Função para atualizar automaticamente agendamentos passados para concluídos
+  const updatePastAgendamentos = async () => {
+    try {
+      const agora = new Date();
+      
+      // Buscar agendamentos passados que não estão concluídos ou cancelados
+      const { data, error } = await supabase
+        .from('agendamentos')
+        .select('*')
+        .eq('user_id', user?.id)
+        .lt('data_hora', agora.toISOString())
+        .not('status', 'in', '("concluido","cancelado")');
+      
+      if (error) {
+        console.error('Erro ao buscar agendamentos passados:', error);
+        return;
+      }
+      
+      // Atualizar cada agendamento passado para concluído
+      if (data && data.length > 0) {
+        for (const agendamento of data) {
+          const { error: updateError } = await supabase
+            .from('agendamentos')
+            .update({ status: 'concluido' })
+            .eq('id', agendamento.id);
+          
+          if (updateError) {
+            console.error('Erro ao atualizar agendamento passado:', updateError);
+          }
+        }
+        
+        // Recarregar dados após as atualizações
+        fetchAgendamentos();
+      }
+    } catch (error) {
+      console.error('Erro ao processar agendamentos passados:', error);
+    }
+  };
 
   const openNew = () => {
     setEditAgendamento(null);
@@ -296,6 +349,12 @@ const Agenda = () => {
       observacoes: agendamento.observacoes || ''
     });
     setModalOpen(true);
+  };
+  
+  const openDayAgendamentosModal = (day: Date, agendamentos: Agendamento[]) => {
+    setSelectedDayForModal(day);
+    setSelectedDayAgendamentos(agendamentos);
+    setDayAgendamentosModalOpen(true);
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -716,7 +775,10 @@ const Agenda = () => {
                   </div>
                 ))}
                 {dayAgendamentos.length > 3 && (
-                  <div className="text-xs text-gray-500 text-center">
+                  <div 
+                    className="text-xs text-gray-500 text-center cursor-pointer hover:text-purple-600 hover:underline"
+                    onClick={() => openDayAgendamentosModal(day, dayAgendamentos)}
+                  >
                     +{dayAgendamentos.length - 3} mais
                   </div>
                 )}
@@ -802,7 +864,10 @@ const Agenda = () => {
                   </div>
                 ))}
                 {dayAgendamentos.length > 2 && (
-                  <div className="text-xs text-gray-500 text-center">
+                  <div 
+                    className="text-xs text-gray-500 text-center cursor-pointer hover:text-purple-600 hover:underline"
+                    onClick={() => openDayAgendamentosModal(day, dayAgendamentos)}
+                  >
                     +{dayAgendamentos.length - 2} mais
                   </div>
                 )}
@@ -848,8 +913,11 @@ const Agenda = () => {
                   </div>
                 ))}
                 {monthAgendamentos.length > 3 && (
-                  <div className="text-xs text-gray-500 text-center">
-                    +{monthAgendamentos.length - 3} mais agendamentos
+                  <div 
+                    className="text-xs text-gray-500 text-center cursor-pointer hover:text-purple-600 hover:underline"
+                    onClick={() => openDayAgendamentosModal(month, monthAgendamentos)}
+                  >
+                    +{monthAgendamentos.length - 3} mais
                   </div>
                 )}
               </div>
@@ -1060,8 +1128,99 @@ const Agenda = () => {
           )}
         </CardContent>
       </Card>
+
+      {/* Modal para exibir todos os agendamentos de um dia */}
+      <Dialog open={dayAgendamentosModalOpen} onOpenChange={setDayAgendamentosModalOpen}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>
+              {selectedDayForModal && (
+                <>Agendamentos de {format(selectedDayForModal, 'dd/MM/yyyy', { locale: ptBR })}</>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+          
+          <div className="max-h-[60vh] overflow-y-auto space-y-4 py-2">
+            {selectedDayAgendamentos.map((agendamento) => (
+              <div 
+                key={agendamento.id} 
+                className={`p-4 rounded-lg border cursor-pointer transition-colors ${
+                  agendamento.status === 'agendado' 
+                    ? 'bg-green-50 border-green-200 hover:bg-green-100' 
+                    : agendamento.status === 'confirmado'
+                    ? 'bg-purple-50 border-purple-200 hover:bg-purple-100'
+                    : agendamento.status === 'cancelado'
+                    ? 'bg-red-50 border-red-200 hover:bg-red-100'
+                    : 'bg-gray-50 border-gray-200 hover:bg-gray-100'
+                }`}
+                onClick={() => {
+                  setDayAgendamentosModalOpen(false);
+                  openEdit(agendamento);
+                }}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3 mb-2">
+                      <User className={`h-4 w-4 ${
+                        agendamento.status === 'agendado' ? 'text-green-600' :
+                        agendamento.status === 'confirmado' ? 'text-purple-600' :
+                        agendamento.status === 'cancelado' ? 'text-red-600' :
+                        'text-gray-600'
+                      }`} />
+                      <span className="font-bold text-lg">
+                        {agendamento.nome_paciente}
+                      </span>
+                      <Badge className={statusColors[agendamento.status]}>
+                        {getStatusText(agendamento.status)}
+                      </Badge>
+                    </div>
+                    
+                    <div className={`flex items-center gap-4 text-sm ${
+                      agendamento.status === 'agendado' ? 'text-green-600' :
+                      agendamento.status === 'confirmado' ? 'text-purple-600' :
+                      agendamento.status === 'cancelado' ? 'text-red-600' :
+                      'text-gray-600'
+                    }`}>
+                      <div className="flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        {formatTime(agendamento.data_hora)} - {formatDuration(agendamento.duracao_minutos)}
+                      </div>
+                      
+                      {agendamento.telefone_paciente && (
+                        <div className="flex items-center gap-1">
+                          <Phone className="h-3 w-3" />
+                          {agendamento.telefone_paciente}
+                        </div>
+                      )}
+                      
+                      {agendamento.email_paciente && (
+                        <div className="flex items-center gap-1">
+                          <Mail className="h-3 w-3" />
+                          {agendamento.email_paciente}
+                        </div>
+                      )}
+                    </div>
+                    
+                    {agendamento.observacoes && (
+                      <p className="text-sm text-gray-600 mt-2">
+                        {agendamento.observacoes}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDayAgendamentosModalOpen(false)}>
+              Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
 
-export default Agenda; 
+export default Agenda;

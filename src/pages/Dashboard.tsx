@@ -52,8 +52,50 @@ const Dashboard = () => {
     if (user) {
       loadStats();
       loadAgendamentos();
+      // Verificar e atualizar agendamentos passados
+      updatePastAgendamentos();
     }
   }, [user]);
+  
+  // Função para atualizar automaticamente agendamentos passados para concluídos
+  const updatePastAgendamentos = async () => {
+    try {
+      const agora = new Date();
+      
+      // Buscar agendamentos passados que não estão concluídos ou cancelados
+      const { data, error } = await supabase
+        .from('agendamentos')
+        .select('*')
+        .eq('user_id', user?.id)
+        .lt('data_hora', agora.toISOString())
+        .not('status', 'in', '("concluido","cancelado")');
+      
+      if (error) {
+        console.error('Erro ao buscar agendamentos passados:', error);
+        return;
+      }
+      
+      // Atualizar cada agendamento passado para concluído
+      if (data && data.length > 0) {
+        for (const agendamento of data) {
+          const { error: updateError } = await supabase
+            .from('agendamentos')
+            .update({ status: 'concluido' })
+            .eq('id', agendamento.id);
+          
+          if (updateError) {
+            console.error('Erro ao atualizar agendamento passado:', updateError);
+          }
+        }
+        
+        // Recarregar dados após as atualizações
+        loadStats();
+        loadAgendamentos();
+      }
+    } catch (error) {
+      console.error('Erro ao processar agendamentos passados:', error);
+    }
+  };
 
   const loadStats = async () => {
     try {
@@ -117,24 +159,24 @@ const Dashboard = () => {
         .eq('user_id', user?.id)
         .order('data_hora', { ascending: true });
 
+      // Sempre filtrar para mostrar apenas agendamentos futuros ou do dia atual
+      query = query.gte('data_hora', hoje.toISOString());
+
       // Filtrar por período
       if (filterPeriod === 'hoje') {
         const inicioHoje = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
         const fimHoje = new Date(inicioHoje.getTime() + 24 * 60 * 60 * 1000);
-        query = query.gte('data_hora', inicioHoje.toISOString()).lt('data_hora', fimHoje.toISOString());
+        query = query.lt('data_hora', fimHoje.toISOString());
       } else if (filterPeriod === 'proximos') {
         const proximosSete = new Date(hoje.getTime() + 7 * 24 * 60 * 60 * 1000);
-        query = query.gte('data_hora', hoje.toISOString()).lt('data_hora', proximosSete.toISOString());
+        query = query.lt('data_hora', proximosSete.toISOString());
       } else if (filterPeriod === 'semana') {
         const proximosSete = new Date(hoje.getTime() + 7 * 24 * 60 * 60 * 1000);
-        query = query.gte('data_hora', hoje.toISOString()).lt('data_hora', proximosSete.toISOString());
+        query = query.lt('data_hora', proximosSete.toISOString());
       } else if (filterPeriod === 'mes') {
-        const inicioMes = startOfMonth(hoje);
         const fimMes = endOfMonth(hoje);
         const fimMesMaisUmDia = new Date(fimMes.getTime() + 24 * 60 * 60 * 1000);
-        query = query
-          .gte('data_hora', inicioMes.toISOString())
-          .lt('data_hora', fimMesMaisUmDia.toISOString());
+        query = query.lt('data_hora', fimMesMaisUmDia.toISOString());
       }
 
       // Filtrar por status

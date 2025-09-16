@@ -163,19 +163,81 @@ export default function Admin() {
   };
 
   const createClient = async () => {
-    if (!email || !password || !nome) return;
-    const { data: sess } = await supabase.auth.getSession();
-    const token = sess.session?.access_token;
-    const { data, error } = await supabase.functions.invoke('admin-panel', {
-      body: { action: 'create', email, password, nome },
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    } as any);
-    if (!error) {
+    if (!email || !password || !nome) {
+      alert('Preencha todos os campos obrigatórios: email, senha e nome.');
+      return;
+    }
+    
+    try {
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess.session?.access_token;
+      
+      if (!token) {
+        console.error('Sessão inválida ou expirada');
+        alert('Sua sessão expirou. Por favor, faça login novamente.');
+        return;
+      }
+      
+      console.log('Tentando criar novo usuário:', { email, nome });
+      
+      const { data, error } = await supabase.functions.invoke('admin-panel', {
+        body: { action: 'create', email, password, nome },
+        headers: { Authorization: `Bearer ${token}` },
+      } as any);
+      
+      if (error) {
+        console.error('Erro ao invocar Edge Function:', error);
+        
+        // Verificar se é um erro de conexão ou timeout
+        if (error.message.includes('Failed to fetch') || error.message.includes('timeout')) {
+          alert('Erro de conexão com o servidor. Verifique sua internet e tente novamente.');
+        } else if (error.message.includes('status code')) {
+          alert('Erro no servidor. Por favor, tente novamente mais tarde ou contate o suporte.');
+        } else {
+          alert('Erro: ' + (error?.message || 'Falha ao criar usuário'));
+        }
+        return;
+      }
+      
+      console.log('Resposta da criação de usuário:', data);
+      
+      // Verificar se a operação foi bem-sucedida com base no campo success
+      if (data && (data.success === false || data.error)) {
+        console.error('Erro retornado pela função Edge:', data.error || 'Erro desconhecido');
+        
+        // Mensagens de erro mais amigáveis baseadas no tipo de erro
+        if (data.error && data.error.includes('already exists')) {
+          alert('Este email já está cadastrado. Por favor, use outro email.');
+        } else if (data.error && data.error.includes('Database error')) {
+          // Tentar carregar os perfis mesmo com erro de banco de dados
+          // pois o usuário pode ter sido criado apesar do erro
+          console.log('Erro de banco de dados detectado, mas tentando verificar se o usuário foi criado...');
+          await loadProfiles();
+          
+          // Verificar se o perfil foi criado comparando com o email fornecido
+          const novoUsuario = profiles.find(p => p.nome.toLowerCase().includes(email.toLowerCase()));
+          
+          if (novoUsuario) {
+            console.log('Usuário parece ter sido criado apesar do erro:', novoUsuario);
+            setEmail(''); setPassword(''); setNome('');
+            alert('Cliente criado com sucesso! (Recuperado de um erro de banco de dados)');
+            return;
+          } else {
+            alert('Erro no banco de dados. Por favor, tente novamente ou contate o suporte.');
+          }
+        } else {
+          alert('Erro: ' + (data.error || 'Falha ao criar usuário'));
+        }
+        return;
+      }
+      
+      // Limpar campos e atualizar lista
       setEmail(''); setPassword(''); setNome('');
       await loadProfiles();
-      alert('Cliente criado');
-    } else {
-      alert('Erro: ' + (error?.message || 'Falha ao criar'));
+      alert('Cliente criado com sucesso!');
+    } catch (err: any) {
+      console.error('Exceção ao criar usuário:', err);
+      alert('Erro inesperado: ' + (err?.message || 'Falha ao criar usuário. Tente novamente.'));
     }
   };
 

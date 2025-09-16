@@ -69,32 +69,157 @@ serve(async (req: Request) => {
     }
 
     if (action === "create") {
-      const { email, password, nome } = body;
-      if (!email || !password) {
-        return new Response(JSON.stringify({ error: "Missing email/password" }), { 
-          status: 400, 
+      try {
+        const { email, password, nome } = body ?? {};
+        if (!email || !password) {
+          return new Response(JSON.stringify({ 
+            error: "Missing email/password", 
+            success: false 
+          }), { 
+            status: 200, // Alterado para 200 para evitar erro de non-2xx status code
+            headers: { ...corsHeaders } 
+          });
+        }
+        
+        // Verificar se o email é válido
+        if (!email.includes('@') || !email.includes('.')) {
+          return new Response(JSON.stringify({ 
+            error: "Email inválido", 
+            success: false 
+          }), { 
+            status: 200,
+            headers: { ...corsHeaders } 
+          });
+        }
+        
+        console.log("Tentando criar usuário:", { email, nome });
+        
+        // Verificar se o usuário já existe
+        try {
+          const { data: existingUser } = await service.auth.admin.getUserByEmail(email);
+          if (existingUser) {
+            console.log("Usuário já existe:", existingUser);
+            return new Response(JSON.stringify({ 
+              error: "Este email já está em uso", 
+              success: false
+            }), { 
+              status: 200, 
+              headers: { ...corsHeaders } 
+            });
+          }
+        } catch (checkError) {
+          console.error("Erro ao verificar usuário existente:", checkError);
+          // Continuar mesmo com erro na verificação
+        }
+        
+        // Criar o usuário
+        console.log("Criando usuário...");
+        let data, error;
+        try {
+          const result = await service.auth.admin.createUser({
+            email,
+            password,
+            email_confirm: true,
+            user_metadata: { nome },
+          } as any);
+          data = result.data;
+          error = result.error;
+        } catch (createError) {
+          console.error("Exceção ao criar usuário:", createError);
+          error = { message: createError instanceof Error ? createError.message : "Erro desconhecido ao criar usuário" };
+        }
+        
+        if (error) {
+          console.error("Erro ao criar usuário:", error);
+          
+          // Tratamento específico para erros de banco de dados
+          if (error.message.includes("Database error")) {
+            console.error("Possível erro de trigger on_auth_user_created_settings");
+            
+            // Tentar novamente a operação após um pequeno delay
+            try {
+              console.log("Tentando recuperar o usuário recém-criado...");
+              // Verificar se o usuário foi criado apesar do erro
+              const { data: existingUser } = await service.auth.admin.getUserByEmail(email);
+              
+              if (existingUser) {
+                console.log("Usuário foi criado apesar do erro de banco de dados:", existingUser);
+                
+                // Tentar criar o perfil para o usuário
+                const { error: profileError } = await service.from("profiles").insert({ 
+                  user_id: existingUser.id, 
+                  nome: nome || email 
+                });
+                
+                if (!profileError) {
+                  return new Response(JSON.stringify({
+                    success: true,
+                    message: "Usuário criado com sucesso (recuperado de erro de banco de dados)"
+                  }), {
+                    status: 200,
+                    headers: { ...corsHeaders }
+                  });
+                }
+              }
+            } catch (recoveryError) {
+              console.error("Erro ao tentar recuperar de erro de banco de dados:", recoveryError);
+            }
+          }
+          
+          return new Response(JSON.stringify({ 
+            error: error.message, 
+            success: false,
+            details: error
+          }), { 
+            status: 200, // Alterado para 200 para evitar erro de non-2xx status code
+            headers: { ...corsHeaders } 
+          });
+        }
+
+        console.log("Usuário criado, inserindo perfil");
+        let profileError;
+        try {
+          if (!data?.user?.id) {
+            throw new Error("ID do usuário não disponível para criar perfil");
+          }
+          
+          const result = await service.from("profiles").insert({ 
+            user_id: data.user.id, 
+            nome: nome || email,
+            email: email
+          });
+          profileError = result.error;
+        } catch (insertError) {
+          console.error("Exceção ao inserir perfil:", insertError);
+          profileError = { message: insertError instanceof Error ? insertError.message : "Erro desconhecido ao criar perfil" };
+        }
+        
+        if (profileError) {
+          console.error("Erro ao criar perfil:", profileError);
+          return new Response(JSON.stringify({ 
+            error: "Usuário criado, mas houve erro ao criar perfil", 
+            success: false,
+            details: profileError
+          }), { 
+            status: 200, 
+            headers: { ...corsHeaders } 
+          });
+        }
+        
+        return new Response(JSON.stringify({ ok: true, success: true, user_id: data.user!.id }), { 
+          status: 200, 
+          headers: { ...corsHeaders } 
+        });
+      } catch (err) {
+        console.error("Exceção ao criar usuário:", err);
+        return new Response(JSON.stringify({ 
+          error: err instanceof Error ? err.message : "Erro desconhecido", 
+          success: false 
+        }), { 
+          status: 200, // Sempre retorna 200 mesmo em caso de erro
           headers: { ...corsHeaders } 
         });
       }
-      
-      const { data, error } = await service.auth.admin.createUser({
-        email,
-        password,
-        email_confirm: true,
-        user_metadata: { nome },
-      } as any);
-      
-      if (error) throw error;
-
-      await service.from("profiles").insert({ 
-        user_id: data.user!.id, 
-        nome: nome || email 
-      });
-      
-      return new Response(JSON.stringify({ ok: true, user_id: data.user!.id }), { 
-        status: 200, 
-        headers: { ...corsHeaders } 
-      });
     }
 
     if (action === "setActive") {
@@ -133,8 +258,15 @@ serve(async (req: Request) => {
     });
     
   } catch (e: any) {
-    return new Response(JSON.stringify({ error: String(e?.message || e) }), { 
-      status: 500, 
+    console.error("Erro não tratado na função admin-panel:", e);
+    
+    // Garantir que sempre retornamos um status 200 para evitar erros de CORS
+    return new Response(JSON.stringify({ 
+      error: String(e?.message || e), 
+      success: false,
+      details: e?.stack || "Sem detalhes disponíveis"
+    }), { 
+      status: 200, // Alterado para 200 para evitar erro de non-2xx status code
       headers: { ...corsHeaders } 
     });
   }
