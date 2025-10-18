@@ -1,150 +1,169 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
+// Inicializa Supabase com Service Role
+const supabase = createClient(Deno.env.get("SUPABASE_URL") ?? "", Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "");
+// Headers padrão com CORS liberado
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Content-Type": "application/json",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type"
 };
-
-serve(async (req: Request) => {
-  console.log("=== FUNCAO ATUALIZADA CHAMADA ===");
+serve(async (req)=>{
+  console.log("=== Edge Function Admin Users Chamada ===");
   console.log("Method:", req.method);
-  
+  // Trata preflight (OPTIONS)
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: { ...corsHeaders } });
+    return new Response("ok", {
+      headers: corsHeaders
+    });
   }
-
   try {
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const authHeader = req.headers.get("Authorization") ?? "";
-
-    const userClient = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const service = createClient(supabaseUrl, serviceKey);
-
-    const { data: userRes } = await userClient.auth.getUser();
-    const user = userRes?.user;
-    if (!user) {
-      console.log("USUARIO NAO ENCONTRADO");
-      return new Response(JSON.stringify({ error: "Unauthorized" }), { 
-        status: 401, 
-        headers: { ...corsHeaders } 
-      });
-    }
-
-    const { data: prof } = await userClient
-      .from("profiles")
-      .select("is_admin")
-      .eq("user_id", user.id)
-      .single();
-    
-    if (!prof?.is_admin) {
-      console.log("NAO EH ADMIN");
-      return new Response(JSON.stringify({ error: "Forbidden" }), { 
-        status: 403, 
-        headers: { ...corsHeaders } 
-      });
-    }
-
-    const body = await req.json();
-    const action = body?.action;
-    console.log("ACAO:", action);
-
+    const { action, email, password, nome, telefone, user_id } = await req.json();
+    console.log("Action:", action);
+    // ============================================
+    // LISTAR USUÁRIOS
+    // ============================================
     if (action === "list") {
-      console.log("EXECUTANDO LISTA ATUALIZADA");
-      const { data, error } = await service
-        .from("profiles")
-        .select("*")
-        .order("created_at", { ascending: true });
-      
-      if (error) {
-        console.log("ERRO DB:", error);
-        throw error;
-      }
-      
-      console.log("PERFIS ENCONTRADOS:", data?.length);
-      console.log("DADOS COMPLETOS:", data);
-      
-      const response = { ok: true, data };
-      console.log("RETORNANDO RESPOSTA:", response);
-      
-      return new Response(JSON.stringify(response), {
-        status: 200,
-        headers: { ...corsHeaders },
+      console.log("Listando usuários...");
+      // Busca usuários da autenticação
+      const { data: authUsers, error: authError } = await supabase.auth.admin.listUsers();
+      if (authError) throw authError;
+      // Busca profiles correspondentes
+      const { data: profiles, error: profileError } = await supabase.from("profiles").select("*").order("created_at", {
+        ascending: false
+      });
+      if (profileError) throw profileError;
+      console.log("Usuários encontrados:", authUsers.users.length);
+      console.log("Profiles encontrados:", profiles.length);
+      return new Response(JSON.stringify({
+        ok: true,
+        users: authUsers.users,
+        profiles: profiles
+      }), {
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
       });
     }
-
-    if (action === "setActive") {
-      const { user_id, active } = body ?? {};
-      if (!user_id || typeof active !== "boolean") {
-        return new Response(JSON.stringify({ error: "Missing user_id/active" }), {
+    // ============================================
+    // CRIAR NOVO USUÁRIO
+    // ============================================
+    if (action === "create") {
+      console.log("Criando novo usuário:", email);
+      if (!email || !password) {
+        return new Response(JSON.stringify({
+          error: "Email e senha são obrigatórios"
+        }), {
           status: 400,
-          headers: { ...corsHeaders },
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json"
+          }
         });
       }
-      const { error } = await service
-        .from("profiles")
-        .update({ active })
-        .eq("user_id", user_id);
-      if (error) throw error;
-      return new Response(JSON.stringify({ ok: true }), {
-        status: 200,
-        headers: { ...corsHeaders },
-      });
-    }
-
-    if (action === "setAdmin") {
-      const { user_id, is_admin } = body ?? {};
-      if (!user_id || typeof is_admin !== "boolean") {
-        return new Response(JSON.stringify({ error: "Missing user_id/is_admin" }), {
+      if (!nome) {
+        return new Response(JSON.stringify({
+          error: "Nome é obrigatório"
+        }), {
           status: 400,
-          headers: { ...corsHeaders },
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json"
+          }
         });
       }
-      const { error } = await service
-        .from("profiles")
-        .update({ is_admin })
-        .eq("user_id", user_id);
-      if (error) throw error;
-      return new Response(JSON.stringify({ ok: true }), {
-        status: 200,
-        headers: { ...corsHeaders },
+      // Cria o usuário na autenticação
+      const { data: newUser, error: authError } = await supabase.auth.admin.createUser({
+        email: email,
+        password: password,
+        email_confirm: true,
+        user_metadata: {
+          nome: nome,
+          telefone: telefone || null
+        }
+      });
+      if (authError) {
+        console.error("Erro ao criar usuário:", authError);
+        throw authError;
+      }
+      console.log("Usuário criado com sucesso:", newUser.user?.id);
+      console.log("Trigger automático criará registros em profiles e user_settings");
+      // Aguarda um pouco para o trigger executar
+      await new Promise((resolve)=>setTimeout(resolve, 1000));
+      // Busca o profile criado pelo trigger
+      const { data: profile, error: profileError } = await supabase.from("profiles").select("*").eq("user_id", newUser.user?.id).single();
+      if (profileError) {
+        console.warn("Profile ainda não criado:", profileError);
+      }
+      return new Response(JSON.stringify({
+        ok: true,
+        user: newUser.user,
+        profile: profile,
+        message: "Usuário criado com sucesso!"
+      }), {
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
       });
     }
-
+    // ============================================
+    // DELETAR USUÁRIO
+    // ============================================
     if (action === "delete") {
-      const { user_id } = body ?? {};
+      console.log("Deletando usuário:", user_id);
       if (!user_id) {
-        return new Response(JSON.stringify({ error: "Missing user_id" }), {
+        return new Response(JSON.stringify({
+          error: "user_id é obrigatório"
+        }), {
           status: 400,
-          headers: { ...corsHeaders },
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json"
+          }
         });
       }
-      const { error } = await service.auth.admin.deleteUser(user_id);
-      if (error) throw error;
-      return new Response(JSON.stringify({ ok: true }), {
-        status: 200,
-        headers: { ...corsHeaders },
+      // Deleta registros relacionados primeiro (se necessário)
+      // O Supabase pode ter cascade delete configurado
+      const { error: deleteError } = await supabase.auth.admin.deleteUser(user_id);
+      if (deleteError) {
+        console.error("Erro ao deletar usuário:", deleteError);
+        throw deleteError;
+      }
+      console.log("Usuário deletado com sucesso");
+      return new Response(JSON.stringify({
+        ok: true,
+        message: "Usuário deletado com sucesso"
+      }), {
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
       });
     }
-
-    return new Response(JSON.stringify({ error: "Invalid action" }), { 
-      status: 400, 
-      headers: { ...corsHeaders } 
+    // ============================================
+    // AÇÃO INVÁLIDA
+    // ============================================
+    return new Response(JSON.stringify({
+      error: "Ação inválida. Use: list, create ou delete"
+    }), {
+      status: 400,
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json"
+      }
     });
-    
-  } catch (e: any) {
-    console.log("ERRO NA FUNCAO:", e);
-    return new Response(JSON.stringify({ error: String(e?.message || e) }), { 
-      status: 500, 
-      headers: { ...corsHeaders } 
+  } catch (err) {
+    console.error("Erro na Edge Function:", err);
+    return new Response(JSON.stringify({
+      error: err.message || "Erro desconhecido"
+    }), {
+      status: 500,
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json"
+      }
     });
   }
 });
-
-
